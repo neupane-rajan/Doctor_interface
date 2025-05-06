@@ -35,17 +35,29 @@ const ChatInput = ({ onSendMessage, isLoading, setCurrentMessage }) => {
     try {
       setRecordingError('');
       
-      // Request microphone access
+      // Request microphone access with specific constraints
       const stream = await navigator.mediaDevices.getUserMedia({ 
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
-          sampleRate: 16000 // Match backend expectations
-        }
+          channelCount: 1
+        } 
       });
       
-      // Create media recorder
-      const options = { mimeType: 'audio/webm' };
+      // Create MediaRecorder with options
+      let options;
+      
+      // Start with more reliable format for speech recognition
+      if (MediaRecorder.isTypeSupported('audio/webm')) {
+        options = { mimeType: 'audio/webm' };
+      } else if (MediaRecorder.isTypeSupported('audio/mp3')) {
+        options = { mimeType: 'audio/mp3' };
+      } else {
+        options = {}; // Browser will choose the best available format
+      }
+      
+      console.log('Using audio recording format:', options.mimeType || 'browser default');
+      
       const mediaRecorder = new MediaRecorder(stream, options);
       
       mediaRecorderRef.current = mediaRecorder;
@@ -61,13 +73,16 @@ const ChatInput = ({ onSendMessage, isLoading, setCurrentMessage }) => {
       // Process audio when recording stops
       mediaRecorder.onstop = async () => {
         // Convert audio chunks to blob
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const mimeType = mediaRecorder.mimeType || 'audio/webm';
+        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
         
         // Check if the audioBlob has data
         if (audioBlob.size === 0) {
           setRecordingError('No audio data captured. Please try again.');
           return;
         }
+        
+        console.log('Sending audio for processing, size:', audioBlob.size, 'bytes, format:', mimeType);
         
         try {
           // Convert blob to base64
@@ -84,16 +99,18 @@ const ChatInput = ({ onSendMessage, isLoading, setCurrentMessage }) => {
                 return;
               }
               
-              console.log('Sending audio for processing, size:', audioBlob.size, 'bytes');
-              
-              // Get transcript from API
-              const result = await chatService.speechToText(base64Audio);
+              // Send to backend with format information
+              const result = await chatService.speechToText(base64Audio, mimeType);
               
               console.log('STT Result:', result);
               
               if (result && result.text) {
-                setInputText(result.text);
-                setCurrentMessage(result.text);
+                if (result.text.includes('Error:')) {
+                  setRecordingError(result.text);
+                } else {
+                  setInputText(result.text);
+                  setCurrentMessage(result.text);
+                }
               } else {
                 setRecordingError('No speech detected or could not understand. Please try again.');
               }
@@ -111,17 +128,16 @@ const ChatInput = ({ onSendMessage, isLoading, setCurrentMessage }) => {
         stream.getTracks().forEach(track => track.stop());
       };
       
-      // Start recording
-      mediaRecorder.start(100);
+      // Start recording with smaller timeslices to get data faster
+      mediaRecorder.start(250);
       setIsRecording(true);
       
-      // Automatically stop recording after 8 seconds
+      // Automatically stop recording after 10 seconds
       setTimeout(() => {
         if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
           stopRecording();
-          console.log('Automatically stopped recording after timeout');
         }
-      }, 8000);
+      }, 10000);
       
     } catch (error) {
       console.error('Error accessing microphone:', error);

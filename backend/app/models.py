@@ -28,3 +28,9 @@ class TTSRequest(BaseModel):
 class STTRequest(BaseModel):
     audio_content: str  # Base64 encoded audio content
     language_code: Optional[str] = "en-US"
+
+class STTRequest(BaseModel):
+    audio_content: str  # Base64 encoded audio content
+    language_code: Optional[str] = "en-US"
+    encoding: Optional[str] = "LINEAR16"  # Add encoding type
+    sample_rate_hertz: Optional[int] = 16000  # Add sample rate

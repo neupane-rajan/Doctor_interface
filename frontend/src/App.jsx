@@ -40,46 +40,49 @@ function App() {
   }, []);
   
   // Use browser's speech synthesis for text-to-speech
-  const speakMessage = (text) => {
+  const speakMessage = async (text) => {
     if (!text) return;
     
-    // Cancel any ongoing speech
-    if (window.speechSynthesis) {
-      window.speechSynthesis.cancel();
-    }
-    
-    // Try to get TTS audio from backend first
-    chatService.textToSpeech(text)
-      .then(response => {
-        if (response && response.audio_url) {
-          // Use audio URL from backend
-          audioRef.current.src = `data:audio/mp3;base64,${response.audio_url}`;
+    try {
+      // Try to get TTS audio from backend first
+      const response = await chatService.textToSpeech(text);
+      
+      if (response && response.audio_url) {
+        console.log("Received audio URL:", response.audio_url.substring(0, 50) + "...");
+        
+        // Make sure audioRef exists
+        if (audioRef.current) {
+          // Set the audio source
+          audioRef.current.src = response.audio_url;
           audioRef.current.onplay = () => setDoctorSpeaking(true);
           audioRef.current.onended = () => setDoctorSpeaking(false);
           
-          // Check if user has interacted with page before playing audio
-          if (userInteracted) {
-            audioRef.current.play().catch(err => {
-              console.error("Error playing audio:", err);
-              // Fall back to browser TTS
-              useBrowserTTS(text);
-            });
-          } else {
-            console.log("Waiting for user interaction before playing welcome audio");
-            // Just show speaking animation without audio until user interacts
-            setDoctorSpeaking(true);
-            setTimeout(() => setDoctorSpeaking(false), 3000);
+          // Play the audio
+          const playPromise = audioRef.current.play();
+          
+          // Handle play promise (required for modern browsers)
+          if (playPromise !== undefined) {
+            playPromise
+              .then(() => {
+                console.log("Audio playback started successfully");
+              })
+              .catch(err => {
+                console.error("Error playing audio:", err);
+                // Fall back to browser TTS
+                useBrowserTTS(text);
+              });
           }
-        } else {
-          // Fall back to browser TTS
-          useBrowserTTS(text);
         }
-      })
-      .catch(error => {
-        console.error("Error with server TTS:", error);
+      } else {
+        console.warn("No audio URL received from TTS service");
         // Fall back to browser TTS
         useBrowserTTS(text);
-      });
+      }
+    } catch (error) {
+      console.error("TTS service error:", error);
+      // Fall back to browser TTS
+      useBrowserTTS(text);
+    }
   };
   
   // Browser's built-in TTS
@@ -297,7 +300,17 @@ function App() {
       </main>
       
       {/* Audio element for TTS playback */}
-      <audio ref={audioRef} className="hidden" />
+      <audio 
+  ref={audioRef} 
+  style={{ display: 'none' }} 
+  onError={(e) => {
+    console.error("Audio playback error:", e);
+    // Fallback to browser TTS if there's an error
+    if (lastMessage && lastMessage.role === 'assistant') {
+      useBrowserTTS(lastMessage.content);
+    }
+  }}
+/>
     </div>
   );
 }

@@ -42,6 +42,7 @@ class STTService:
         """Convert speech to text using Google STT API"""
         try:
             logger.info(f"Processing STT request with language code: {stt_request.language_code}")
+            logger.info(f"Audio encoding: {stt_request.encoding}, Sample rate: {stt_request.sample_rate_hertz}")
             
             # Validate input
             if not stt_request.audio_content:
@@ -65,22 +66,36 @@ class STTService:
             # Create the audio input object
             audio = speech.RecognitionAudio(content=audio_content)
             
+            # Determine the encoding type
+            encoding_map = {
+                "LINEAR16": speech.RecognitionConfig.AudioEncoding.LINEAR16,
+                "FLAC": speech.RecognitionConfig.AudioEncoding.FLAC,
+                "MP3": speech.RecognitionConfig.AudioEncoding.MP3,
+                "OGG_OPUS": speech.RecognitionConfig.AudioEncoding.OGG_OPUS,
+                "WEBM_OPUS": speech.RecognitionConfig.AudioEncoding.WEBM_OPUS,
+                "MULAW": speech.RecognitionConfig.AudioEncoding.MULAW,
+                "AMR": speech.RecognitionConfig.AudioEncoding.AMR,
+                "AMR_WB": speech.RecognitionConfig.AudioEncoding.AMR_WB,
+                "SPEEX_WITH_HEADER_BYTE": speech.RecognitionConfig.AudioEncoding.SPEEX_WITH_HEADER_BYTE,
+            }
+            
+            # Default to LINEAR16 if encoding not recognized
+            encoding = encoding_map.get(
+                stt_request.encoding, 
+                speech.RecognitionConfig.AudioEncoding.LINEAR16
+            )
+            
             # Configure the request
             config = speech.RecognitionConfig(
-                encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
-                sample_rate_hertz=16000,
+                encoding=encoding,
+                sample_rate_hertz=stt_request.sample_rate_hertz or 16000,
                 language_code=stt_request.language_code or "en-US",
                 enable_automatic_punctuation=True,
                 audio_channel_count=1,
                 model="default"
             )
             
-            # Add optional configuration for better results
-            # Uncomment and modify these as needed for your specific use case
-            # config.enable_word_time_offsets = True  # Get timing information
-            # config.use_enhanced = True  # Use enhanced model (may incur additional cost)
-            # config.model = "medical_conversation"  # Use a domain-specific model if available
-            
+            logger.info(f"Using encoding: {encoding}, sample rate: {stt_request.sample_rate_hertz or 16000}")
             logger.info("Sending recognition request to Google STT API")
             
             # Perform the speech-to-text conversion with timeout handling

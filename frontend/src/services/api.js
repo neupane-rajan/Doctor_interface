@@ -74,58 +74,56 @@ export const chatService = {
     }
   },
   
-  // Convert speech to text - IMPROVED VERSION TO HANDLE STRING RESPONSE
-  speechToText: async (audioBase64) => {
+  speechToText: async (audioBase64, mimeType = 'audio/webm') => {
     try {
       // Check if audioBase64 is empty
       if (!audioBase64 || audioBase64.length === 0) {
         throw new Error('Empty audio data');
       }
       
-      console.log(`Sending audio data to STT API, length: ${audioBase64.length} chars`);
+      // Determine encoding from MIME type
+      let encoding = "LINEAR16";
+      if (mimeType.includes('audio/webm')) {
+        encoding = "WEBM_OPUS";
+      } else if (mimeType.includes('audio/mp3') || mimeType.includes('audio/mpeg')) {
+        encoding = "MP3";
+      } else if (mimeType.includes('audio/ogg')) {
+        encoding = "OGG_OPUS";
+      }
       
-      const response = await apiClient.post('/stt', {
+      console.log(`Sending audio data to STT API, length: ${audioBase64.length} chars, format: ${mimeType}, encoding: ${encoding}`);
+      
+      const response = await apiClient.post('/api/stt', {
         audio_content: audioBase64,
         language_code: 'en-US',
-      }, {
-        // Add timeout to prevent hanging requests
-        timeout: 30000
+        encoding: encoding,
+        sample_rate_hertz: 16000 // Match browser's sample rate
       });
       
       console.log('STT Response type:', typeof response.data);
       
       // Handle different response formats
       if (typeof response.data === 'string') {
-        // If backend returns a direct string
-        if (response.data.includes('Error:')) {
-          console.warn('STT error:', response.data);
-          throw new Error(response.data);
-        }
-        // Return in a format the component expects
         return { text: response.data };
       } 
       else if (response.data && response.data.text) {
-        // If backend returns a JSON object with text property
         return response.data;
       }
       else {
         console.warn('STT API returned unexpected response format:', response.data);
-        // Try to handle unknown formats gracefully
         return { text: response.data ? response.data.toString() : '' };
       }
     } catch (error) {
       console.error('Error in speech-to-text:', error);
       
-      // Add more detailed error information
       if (error.response) {
         console.error('STT error status:', error.response.status);
         console.error('STT error data:', error.response.data);
       }
       
-      throw error;
+      return { text: `Error: ${error.message || 'Failed to process speech'}` };
     }
   },
-  
   // Convert text to speech
   textToSpeech: async (text, options = {}) => {
     try {
