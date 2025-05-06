@@ -36,22 +36,38 @@ const ChatInput = ({ onSendMessage, isLoading, setCurrentMessage }) => {
       setRecordingError('');
       
       // Request microphone access
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          sampleRate: 16000 // Match backend expectations
+        }
+      });
       
       // Create media recorder
-      const mediaRecorder = new MediaRecorder(stream);
+      const options = { mimeType: 'audio/webm' };
+      const mediaRecorder = new MediaRecorder(stream, options);
+      
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
       
       // Store audio chunks as they become available
       mediaRecorder.ondataavailable = (e) => {
-        audioChunksRef.current.push(e.data);
+        if (e.data.size > 0) {
+          audioChunksRef.current.push(e.data);
+        }
       };
       
       // Process audio when recording stops
       mediaRecorder.onstop = async () => {
         // Convert audio chunks to blob
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        
+        // Check if the audioBlob has data
+        if (audioBlob.size === 0) {
+          setRecordingError('No audio data captured. Please try again.');
+          return;
+        }
         
         try {
           // Convert blob to base64
@@ -63,23 +79,32 @@ const ChatInput = ({ onSendMessage, isLoading, setCurrentMessage }) => {
               // Get base64 data and remove the prefix
               const base64Audio = reader.result.split(',')[1];
               
+              if (!base64Audio) {
+                setRecordingError('Error processing audio data.');
+                return;
+              }
+              
+              console.log('Sending audio for processing, size:', audioBlob.size, 'bytes');
+              
               // Get transcript from API
               const result = await chatService.speechToText(base64Audio);
+              
+              console.log('STT Result:', result);
               
               if (result && result.text) {
                 setInputText(result.text);
                 setCurrentMessage(result.text);
               } else {
-                setRecordingError('No speech detected');
+                setRecordingError('No speech detected or could not understand. Please try again.');
               }
             } catch (error) {
               console.error('Speech recognition error:', error);
-              setRecordingError('Could not process speech');
+              setRecordingError(error.message || 'Failed to process speech. Please try again.');
             }
           };
         } catch (error) {
           console.error('Error processing audio:', error);
-          setRecordingError('Error processing audio');
+          setRecordingError('Error processing audio.');
         }
         
         // Stop all audio tracks
@@ -87,17 +112,26 @@ const ChatInput = ({ onSendMessage, isLoading, setCurrentMessage }) => {
       };
       
       // Start recording
-      mediaRecorder.start();
+      mediaRecorder.start(100);
       setIsRecording(true);
+      
+      // Automatically stop recording after 8 seconds
+      setTimeout(() => {
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+          stopRecording();
+          console.log('Automatically stopped recording after timeout');
+        }
+      }, 8000);
+      
     } catch (error) {
       console.error('Error accessing microphone:', error);
-      setRecordingError('Could not access microphone');
+      setRecordingError('Could not access microphone. Please check permissions.');
     }
   };
   
   // Stop recording
   const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
       mediaRecorderRef.current.stop();
       setIsRecording(false);
     }
@@ -106,7 +140,9 @@ const ChatInput = ({ onSendMessage, isLoading, setCurrentMessage }) => {
   return (
     <div className="border-t border-gray-200 p-4">
       {recordingError && (
-        <div className="text-red-500 text-sm mb-2">{recordingError}</div>
+        <div className="text-red-500 text-sm mb-2 px-3 py-1 bg-red-50 rounded-md">
+          {recordingError}
+        </div>
       )}
       
       <form onSubmit={handleSubmit} className="flex items-center space-x-2">
@@ -169,6 +205,12 @@ const ChatInput = ({ onSendMessage, isLoading, setCurrentMessage }) => {
           )}
         </button>
       </form>
+      
+      {isRecording && (
+        <div className="mt-2 text-center text-xs text-gray-500">
+          <div className="animate-pulse text-red-500">Recording... (click microphone to stop)</div>
+        </div>
+      )}
     </div>
   );
 };

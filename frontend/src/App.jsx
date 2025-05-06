@@ -12,6 +12,7 @@ function App() {
   const [doctorSpeaking, setDoctorSpeaking] = useState(false);
   const [currentMessage, setCurrentMessage] = useState('');
   const [conversationHistory, setConversationHistory] = useState([]);
+  const [userInteracted, setUserInteracted] = useState(false);
   const audioRef = useRef(new Audio());
   const messagesEndRef = useRef(null);
   
@@ -19,6 +20,24 @@ function App() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+  
+  // Track user interaction
+  useEffect(() => {
+    const handleUserInteraction = () => {
+      setUserInteracted(true);
+      // Remove event listeners after first interaction
+      document.removeEventListener('click', handleUserInteraction);
+      document.removeEventListener('keydown', handleUserInteraction);
+    };
+    
+    document.addEventListener('click', handleUserInteraction);
+    document.addEventListener('keydown', handleUserInteraction);
+    
+    return () => {
+      document.removeEventListener('click', handleUserInteraction);
+      document.removeEventListener('keydown', handleUserInteraction);
+    };
+  }, []);
   
   // Use browser's speech synthesis for text-to-speech
   const speakMessage = (text) => {
@@ -34,14 +53,23 @@ function App() {
       .then(response => {
         if (response && response.audio_url) {
           // Use audio URL from backend
-          audioRef.current.src = response.audio_url;
+          audioRef.current.src = `data:audio/mp3;base64,${response.audio_url}`;
           audioRef.current.onplay = () => setDoctorSpeaking(true);
           audioRef.current.onended = () => setDoctorSpeaking(false);
-          audioRef.current.play().catch(err => {
-            console.error("Error playing audio:", err);
-            // Fall back to browser TTS
-            useBrowserTTS(text);
-          });
+          
+          // Check if user has interacted with page before playing audio
+          if (userInteracted) {
+            audioRef.current.play().catch(err => {
+              console.error("Error playing audio:", err);
+              // Fall back to browser TTS
+              useBrowserTTS(text);
+            });
+          } else {
+            console.log("Waiting for user interaction before playing welcome audio");
+            // Just show speaking animation without audio until user interacts
+            setDoctorSpeaking(true);
+            setTimeout(() => setDoctorSpeaking(false), 3000);
+          }
         } else {
           // Fall back to browser TTS
           useBrowserTTS(text);
@@ -58,12 +86,19 @@ function App() {
   const useBrowserTTS = (text) => {
     if (!window.speechSynthesis) return;
     
-    setDoctorSpeaking(true);
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 1.0;
-    utterance.pitch = 1.0;
-    utterance.onend = () => setDoctorSpeaking(false);
-    window.speechSynthesis.speak(utterance);
+    // Only use browser TTS if user has interacted
+    if (userInteracted) {
+      setDoctorSpeaking(true);
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 1.0;
+      utterance.pitch = 1.0;
+      utterance.onend = () => setDoctorSpeaking(false);
+      window.speechSynthesis.speak(utterance);
+    } else {
+      // Just show speaking animation without audio
+      setDoctorSpeaking(true);
+      setTimeout(() => setDoctorSpeaking(false), 3000);
+    }
   };
   
   // Handle sending a message
@@ -133,10 +168,17 @@ function App() {
         audioRef.current.src = response.audio_url;
         audioRef.current.onplay = () => setDoctorSpeaking(true);
         audioRef.current.onended = () => setDoctorSpeaking(false);
-        audioRef.current.play().catch(err => {
-          console.error("Error playing audio:", err);
-          speakMessage(botMessage.text);
-        });
+        
+        if (userInteracted) {
+          audioRef.current.play().catch(err => {
+            console.error("Error playing audio:", err);
+            speakMessage(botMessage.text);
+          });
+        } else {
+          // Just animate doctor without audio
+          setDoctorSpeaking(true);
+          setTimeout(() => setDoctorSpeaking(false), 3000);
+        }
       } else {
         // Otherwise use TTS
         speakMessage(botMessage.text);
@@ -165,6 +207,9 @@ function App() {
   
   // Handle starting a new chat
   const handleNewChat = () => {
+    // Set user as having interacted since this is a manual action
+    setUserInteracted(true);
+    
     // Reset states
     setMessages([]);
     setConversationHistory([]);
@@ -185,9 +230,33 @@ function App() {
   // Initialize with welcome message
   useEffect(() => {
     if (messages.length === 0) {
-      handleNewChat();
+      // Add the initial welcome message
+      const welcomeMessage = {
+        id: Date.now(),
+        text: "Hello! I'm your medical assistant. How can I help you today?",
+        isUser: false,
+        timestamp: new Date().toISOString(),
+      };
+      
+      setMessages([welcomeMessage]);
+      
+      // Don't try to play audio yet since user hasn't interacted
+      // Just set doctor speaking for animation
+      setDoctorSpeaking(true);
+      setTimeout(() => setDoctorSpeaking(false), 3000);
     }
   }, []);
+
+  // Add an effect to play welcome audio once user has interacted
+  useEffect(() => {
+    if (userInteracted && messages.length > 0 && !doctorSpeaking) {
+      // Try to play the welcome message once user has interacted
+      const welcomeMessage = messages[0];
+      if (welcomeMessage && !welcomeMessage.isUser) {
+        speakMessage(welcomeMessage.text);
+      }
+    }
+  }, [userInteracted]);
 
   return (
     <div className="flex flex-col h-screen bg-gray-50">
@@ -217,6 +286,13 @@ function App() {
             isLoading={isLoading}
             setCurrentMessage={setCurrentMessage}
           />
+          
+          {/* User interaction instruction */}
+          {!userInteracted && (
+            <div className="bg-blue-50 text-blue-700 p-2 text-center text-sm">
+              Click or type anywhere to enable audio
+            </div>
+          )}
         </div>
       </main>
       

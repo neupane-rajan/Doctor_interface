@@ -9,6 +9,40 @@ const apiClient = axios.create({
   },
 });
 
+// Add request interceptor for logging
+apiClient.interceptors.request.use(request => {
+  // Log request info without logging large payloads
+  const logRequest = { ...request };
+  if (request.data && typeof request.data === 'object') {
+    // For large data like audio, just log the presence
+    if (request.url.includes('/stt') && request.data.audio_content) {
+      logRequest.data = { 
+        audio_content: `[Base64 audio data: ${request.data.audio_content.length} chars]`,
+        ...request.data
+      };
+      delete logRequest.data.audio_content;
+    }
+  }
+  console.log('API Request:', logRequest.method, logRequest.url, logRequest.data);
+  return request;
+}, error => {
+  return Promise.reject(error);
+});
+
+// Add response interceptor for logging
+apiClient.interceptors.response.use(response => {
+  // Log response info
+  console.log('API Response:', response.status, response.config.url);
+  return response;
+}, error => {
+  console.error('API Error:', error.message);
+  if (error.response) {
+    console.error('Response status:', error.response.status);
+    console.error('Response data:', error.response.data);
+  }
+  return Promise.reject(error);
+});
+
 export const chatService = {
   // Send text message to backend
   sendMessage: async (message, conversationHistory = []) => {
@@ -36,40 +70,78 @@ export const chatService = {
       return response.data;
     } catch (error) {
       console.error('Error sending message:', error);
+      throw error;
+    }
+  },
+  
+  // Convert speech to text - IMPROVED VERSION TO HANDLE STRING RESPONSE
+  speechToText: async (audioBase64) => {
+    try {
+      // Check if audioBase64 is empty
+      if (!audioBase64 || audioBase64.length === 0) {
+        throw new Error('Empty audio data');
+      }
       
-      // Log more details about the error
+      console.log(`Sending audio data to STT API, length: ${audioBase64.length} chars`);
+      
+      const response = await apiClient.post('/stt', {
+        audio_content: audioBase64,
+        language_code: 'en-US',
+      }, {
+        // Add timeout to prevent hanging requests
+        timeout: 30000
+      });
+      
+      console.log('STT Response type:', typeof response.data);
+      
+      // Handle different response formats
+      if (typeof response.data === 'string') {
+        // If backend returns a direct string
+        if (response.data.includes('Error:')) {
+          console.warn('STT error:', response.data);
+          throw new Error(response.data);
+        }
+        // Return in a format the component expects
+        return { text: response.data };
+      } 
+      else if (response.data && response.data.text) {
+        // If backend returns a JSON object with text property
+        return response.data;
+      }
+      else {
+        console.warn('STT API returned unexpected response format:', response.data);
+        // Try to handle unknown formats gracefully
+        return { text: response.data ? response.data.toString() : '' };
+      }
+    } catch (error) {
+      console.error('Error in speech-to-text:', error);
+      
+      // Add more detailed error information
       if (error.response) {
-        console.error('Response error data:', error.response.data);
-        console.error('Response status:', error.response.status);
+        console.error('STT error status:', error.response.status);
+        console.error('STT error data:', error.response.data);
       }
       
       throw error;
     }
   },
   
-  // Convert speech to text
-  speechToText: async (audioBase64) => {
-    try {
-      const response = await apiClient.post('/stt', {
-        audio_content: audioBase64,
-        language_code: 'en-US',
-      });
-      return response.data;
-    } catch (error) {
-      console.error('Error in speech-to-text:', error);
-      throw error;
-    }
-  },
-  
   // Convert text to speech
-  textToSpeech: async (text, voiceName = "en-US-Neural2-F") => {
+  textToSpeech: async (text, options = {}) => {
     try {
-      const response = await apiClient.post('/tts', { 
-        text: text,
-        voice_name: voiceName,
+      const defaultOptions = {
+        voice_name: "en-US-Chirp-HD-F", // Using new Chirp HD voice
         speaking_rate: 1.0,
         pitch: 0.0
+      };
+      
+      const mergedOptions = {...defaultOptions, ...options};
+      
+      const response = await apiClient.post('/tts', { 
+        text: text,
+        ...mergedOptions
       });
+      
       return response.data;
     } catch (error) {
       console.error('Error in text-to-speech:', error);
